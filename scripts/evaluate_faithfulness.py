@@ -1,12 +1,12 @@
 import json
 import re
+import glob
 from tqdm import tqdm
+from collections import defaultdict
 
-
-
+############################################
 # CONFIG
-
-RAG_PATH = "rag_batch.jsonl"
+############################################
 
 STOPWORDS = set([
     "the", "is", "are", "was", "were", "a", "an", "of", "to", "in",
@@ -14,18 +14,18 @@ STOPWORDS = set([
     "it", "be", "from", "at"
 ])
 
-
-
+############################################
 # TOKENIZATION
+############################################
 
 def tokenize(text):
     text = text.lower()
     tokens = re.findall(r"[a-zA-Z]+", text)
     return [t for t in tokens if t not in STOPWORDS and len(t) > 2]
 
-
-
-# CITATION OVERLAP
+############################################
+# METRICS
+############################################
 
 def citation_overlap(answer, docs):
     answer_tokens = set(tokenize(answer))
@@ -39,14 +39,9 @@ def citation_overlap(answer, docs):
     overlap = answer_tokens & doc_tokens
     return len(overlap) / len(answer_tokens)
 
-
-
-# ATTRIBUTION SCORE
-
 def attribution_score(answer, docs):
     sentences = re.split(r"[.!?]", answer)
-    supported = 0
-    total = 0
+    supported, total = 0, 0
 
     doc_text = " ".join(d["text"].lower() for d in docs)
 
@@ -57,7 +52,6 @@ def attribution_score(answer, docs):
 
         total += 1
         tokens = tokenize(sent)
-
         if not tokens:
             continue
 
@@ -65,39 +59,42 @@ def attribution_score(answer, docs):
         if hits / len(tokens) >= 0.3:
             supported += 1
 
-    if total == 0:
-        return 0.0
+    return supported / total if total > 0 else 0.0
 
-    return supported / total
+############################################
+# RUN
+############################################
 
+if __name__ == "__main__":
 
+    stats = defaultdict(lambda: {
+        "citation": [],
+        "attribution": []
+    })
 
-# RUN EVALUATION
+    for path in glob.glob("rag_*.jsonl"):
+        _, llm, retriever = path.replace(".jsonl", "").split("_", 2)
+        key = f"{llm} + {retriever}"
 
-citation_scores = []
-attribution_scores = []
+        with open(path, encoding="utf-8") as f:
+            for line in tqdm(f, desc=f"Evaluating {key}"):
+                item = json.loads(line)
 
-with open(RAG_PATH, encoding="utf-8") as f:
-    for line in tqdm(f, desc="Evaluating faithfulness"):
-        item = json.loads(line)
+                stats[key]["citation"].append(
+                    citation_overlap(
+                        item["generated_answer"],
+                        item["retrieved_docs"]
+                    )
+                )
+                stats[key]["attribution"].append(
+                    attribution_score(
+                        item["generated_answer"],
+                        item["retrieved_docs"]
+                    )
+                )
 
-        answer = item["generated_answer"]
-        docs = item["retrieved_docs"]
-
-        citation_scores.append(
-            citation_overlap(answer, docs)
-        )
-        attribution_scores.append(
-            attribution_score(answer, docs)
-        )
-
-
-
-# RESULTS
-
-avg_citation = sum(citation_scores) / len(citation_scores)
-avg_attribution = sum(attribution_scores) / len(attribution_scores)
-
-print("\n=== Faithfulness Metrics (DPR-RAG) ===")
-print(f"Avg Citation Overlap: {avg_citation:.4f}")
-print(f"Avg Attribution Score: {avg_attribution:.4f}")
+    # ---- REPORT ----
+    for k, v in stats.items():
+        print(f"\n=== Faithfulness | {k} ===")
+        print(f"Avg Citation Overlap: {sum(v['citation']) / len(v['citation']):.4f}")
+        print(f"Avg Attribution Score: {sum(v['attribution']) / len(v['attribution']):.4f}")

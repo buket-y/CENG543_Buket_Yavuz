@@ -1,29 +1,57 @@
-from retrieve import retrieve
-from generate import generate_answer
-import json
+# scripts/run_rag.py
 
-def run_rag(question, gold_answer=None, k=5):
-    docs = retrieve(question, top_k=k)
-    answer = generate_answer(question, docs)
+from typing import Optional
+
+from generate import generate_answer
+
+
+############################################
+# CORE RAG FUNCTION (STATELESS)
+############################################
+
+def run_rag(
+    question: str,
+    gold_answer: Optional[str],
+    k: int,
+    retriever,
+    tokenizer,
+    model,
+    retriever_name: str,
+    generator_name: str
+):
+    """
+    Runs a single RAG inference.
+    All dependencies are injected explicitly.
+    """
+
+    docs = retriever.retrieve(question, top_k=k)
+
+    answer = generate_answer(
+        question=question,
+        docs=docs,
+        tokenizer=tokenizer,
+        model=model
+    )
 
     result = {
         "question": question,
         "gold_answer": gold_answer,
         "retrieved_docs": docs,
         "generated_answer": answer,
-        "retriever": "DPR",
-        "generator": "Mistral-7B-Instruct",
+        "retriever": retriever_name,
+        "generator": generator_name,
         "k": k
     }
 
     return result
 
 
+############################################
+# OPTIONAL STANDALONE TEST
+############################################
+
 if __name__ == "__main__":
-    q = "What is the role of BRCA1 in breast cancer?"
-    out = run_rag(q)
-
-    print("Generated Answer:\n", out["generated_answer"])
-
-    with open("rag_outputs.jsonl", "a") as f:
-        f.write(json.dumps(out) + "\n")
+    print(
+        "run_rag.py is a helper module.\n"
+        "Please run experiments via run_experiments.py"
+    )

@@ -1,19 +1,18 @@
 import json
 import re
+import glob
+from collections import defaultdict
 from sklearn.metrics import f1_score, accuracy_score
 
-
-
+############################################
 # CONFIG
-
-LLM_ONLY_PATH = "llm_only_batch.jsonl"
-RAG_PATH = "rag_batch.jsonl"
+############################################
 
 LABELS = ["yes", "no", "maybe"]
 
-
-
+############################################
 # NORMALIZATION
+############################################
 
 def normalize_answer(text: str) -> str:
     if text is None:
@@ -32,13 +31,12 @@ def normalize_answer(text: str) -> str:
 
     return "unknown"
 
-
-
-# LOAD JSONL
+############################################
+# LOAD + GROUP
+############################################
 
 def load_predictions(path):
-    gold = []
-    pred = []
+    gold, pred = [], []
 
     with open(path, encoding="utf-8") as f:
         for line in f:
@@ -48,32 +46,53 @@ def load_predictions(path):
             pred_label = normalize_answer(item["generated_answer"])
 
             if gold_label not in LABELS:
-                continue  # safety
+                continue
 
             gold.append(gold_label)
             pred.append(pred_label)
 
     return gold, pred
 
-
-
+############################################
 # EVALUATION
+############################################
 
-def evaluate(path, name):
+def evaluate(path):
     gold, pred = load_predictions(path)
 
-    f1 = f1_score(gold, pred, labels=LABELS, average="macro")
-    acc = accuracy_score(gold, pred)
+    if not gold:
+        return None
 
-    print(f"\n=== {name} ===")
-    print(f"Samples: {len(gold)}")
-    print(f"Macro-F1: {f1:.4f}")
-    print(f"Accuracy: {acc:.4f}")
+    return {
+        "samples": len(gold),
+        "macro_f1": f1_score(gold, pred, labels=LABELS, average="macro"),
+        "accuracy": accuracy_score(gold, pred)
+    }
 
-
-
+############################################
 # RUN
+############################################
 
 if __name__ == "__main__":
-    evaluate(LLM_ONLY_PATH, "LLM-only")
-    evaluate(RAG_PATH, "DPR-RAG")
+
+    results = {}
+
+    # ---- LLM-ONLY ----
+    for path in glob.glob("llm_only_*.jsonl"):
+        llm = path.replace("llm_only_", "").replace(".jsonl", "")
+        results[f"LLM-only | {llm}"] = evaluate(path)
+
+    # ---- RAG ----
+    for path in glob.glob("rag_*.jsonl"):
+        _, llm, retriever = path.replace(".jsonl", "").split("_", 2)
+        key = f"RAG | {llm} + {retriever}"
+        results[key] = evaluate(path)
+
+    # ---- PRINT ----
+    for k, v in results.items():
+        if v is None:
+            continue
+        print(f"\n=== {k} ===")
+        print(f"Samples: {v['samples']}")
+        print(f"Macro-F1: {v['macro_f1']:.4f}")
+        print(f"Accuracy: {v['accuracy']:.4f}")

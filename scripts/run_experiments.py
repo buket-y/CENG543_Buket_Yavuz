@@ -1,108 +1,130 @@
+# scripts/run_experiments.py
+
 import json
 from tqdm import tqdm
 
-from scripts.generate import generate_answer
-from scripts.retrieve import retrieve
+from generate import load_llm
+from retrieve import DPRRetriever
+from run_rag import run_rag
+from run_llm_only import run_llm_only
 
 
 # =====================
 # CONFIG
 # =====================
+
 DATA_PATH = "data/raw/pubmedqa.json"
 
-OUT_LLM_ONLY = "llm_only_batch.jsonl"
-OUT_RAG = "rag_batch.jsonl"
-
-MAX_QUESTIONS = 50      # deney için ilk N soru
+MAX_QUESTIONS = 1
 TOP_K = 5
+
+# ---- LLM CONFIGS ----
+LLMS = {
+    "Mistral-7B": "mistralai/Mistral-7B-Instruct-v0.2",
+    "Phi-3": "microsoft/Phi-3-mini-4k-instruct",
+    "Gemma-2B": "google/gemma-2b-it",
+}
+
+# ---- RETRIEVER CONFIG ----
+RETRIEVER_CONFIGS = {
+    "DPR": {
+        "corpus_path": "data/processed/pubmed_corpus_fixed.tsv",
+        "index_path": "dpr_faiss.index"
+    },
+    "SBERT": {
+        "type": "sbert",
+        "corpus_path": "data/processed/pubmed_corpus_fixed.tsv",
+        "index_path": "sbert_faiss.index",
+        "model_name": "sentence-transformers/all-MiniLM-L6-v2"
+    }
+}
 
 
 # =====================
 # LOAD DATASET
 # =====================
+
 with open(DATA_PATH, encoding="utf-8") as f:
     data = json.load(f)
 
 questions = []
-
 for qid, item in data.items():
-    # PubMedQA schema (CONFIRMED)
-    question = item["question"]                 # ✅ doğru key
-    gold_answer = item.get("answer", None)      # yes / no / maybe
-
     questions.append({
         "id": qid,
-        "question": question,
-        "gold_answer": gold_answer
+        "question": item["question"],
+        "gold_answer": item.get("answer", None)
     })
 
 questions = questions[:MAX_QUESTIONS]
-
 print(f"Loaded {len(questions)} questions")
-
-
-# =====================
-# CLEAR OLD OUTPUTS
-# =====================
-open(OUT_LLM_ONLY, "w").close()
-open(OUT_RAG, "w").close()
 
 
 # =====================
 # RUN EXPERIMENTS
 # =====================
-for item in tqdm(questions, desc="Running batch experiments"):
 
-    qid = item["id"]
-    question = item["question"]
-    gold_answer = item["gold_answer"]
+for llm_name, llm_model in LLMS.items():
 
-    # ==================================================
+    print(f"\n=== Loading LLM: {llm_name} ===")
+    tokenizer, model = load_llm(llm_model)
+
+    # -------------------------
     # LLM-ONLY
-    # ==================================================
-    llm_answer = generate_answer(
-        question=question,
-        docs=[]
-    )
+    # -------------------------
+    out_llm_only = f"llm_only_{llm_name}.jsonl"
+    open(out_llm_only, "w").close()
 
-    llm_record = {
-        "id": qid,
-        "question": question,
-        "gold_answer": gold_answer,
-        "retrieved_docs": [],
-        "generated_answer": llm_answer,
-        "setting": "LLM-only"
-    }
+    for item in tqdm(questions, desc=f"LLM-only | {llm_name}"):
 
-    with open(OUT_LLM_ONLY, "a", encoding="utf-8") as f:
-        f.write(json.dumps(llm_record, ensure_ascii=False) + "\n")
+        record = run_llm_only(
+            question=item["question"],
+            gold_answer=item["gold_answer"],
+            tokenizer=tokenizer,
+            model=model,
+            generator_name=llm_name
+        )
 
+        record["id"] = item["id"]
 
-    # ==================================================
-    # DPR-RAG
-    # ==================================================
-    retrieved_docs = retrieve(
-        query=question,
-        top_k=TOP_K
-    )
-
-    rag_answer = generate_answer(
-        question=question,
-        docs=retrieved_docs
-    )
-
-    rag_record = {
-        "id": qid,
-        "question": question,
-        "gold_answer": gold_answer,
-        "retrieved_docs": retrieved_docs,
-        "generated_answer": rag_answer,
-        "setting": "DPR-RAG",
-        "top_k": TOP_K
-    }
-
-    with open(OUT_RAG, "a", encoding="utf-8") as f:
-        f.write(json.dumps(rag_record, ensure_ascii=False) + "\n")
+        with open(out_llm_only, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
-print("Batch experiments completed.")
+    # -------------------------
+    # RAG (per retriever)
+    # -------------------------
+    for retriever_name, cfg in RETRIEVER_CONFIGS.items():
+
+        print(f"\n--- Initializing Retriever: {retriever_name} ---")
+
+        retriever = DPRRetriever(
+            corpus_path=cfg["corpus_path"],
+            index_path=cfg["index_path"]
+        )
+
+        out_rag = f"rag_{llm_name}_{retriever_name}.jsonl"
+        open(out_rag, "w").close()
+
+        for item in tqdm(
+            questions,
+            desc=f"RAG | {llm_name} + {retriever_name}"
+        ):
+
+            record = run_rag(
+                question=item["question"],
+                gold_answer=item["gold_answer"],
+                k=TOP_K,
+                retriever=retriever,
+                tokenizer=tokenizer,
+                model=model,
+                retriever_name=retriever_name,
+                generator_name=llm_name
+            )
+
+            record["id"] = item["id"]
+
+            with open(out_rag, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+print("\nAll batch experiments completed.")

@@ -4,30 +4,32 @@ import torch
 from transformers import AutoTokenizer, AutoModelForCausalLM
 
 ############################################
-# MODEL CONFIGURATION
+# DEVICE & DTYPE
 ############################################
-
-# Şu an için SABİT bir model seçiyoruz.
-# (İleride tek satırda değiştirilebilir)
-MODEL_NAME = "mistralai/Mistral-7B-Instruct-v0.2"
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 DTYPE = torch.float16 if DEVICE == "cuda" else torch.float32
 
 
 ############################################
-# LOAD MODEL & TOKENIZER
+# LLM LOADING (CALLED EXPLICITLY)
 ############################################
 
-tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+def load_llm(model_name: str):
+    """
+    Loads tokenizer and model for a given LLM.
+    This function MUST be called explicitly (no import-time loading).
+    """
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
 
-model = AutoModelForCausalLM.from_pretrained(
-    MODEL_NAME,
-    torch_dtype=DTYPE,
-    device_map="auto" if DEVICE == "cuda" else None
-)
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name,
+        torch_dtype=DTYPE,
+        device_map="auto" if DEVICE == "cuda" else None
+    )
 
-model.eval()
+    model.eval()
+    return tokenizer, model
 
 
 ############################################
@@ -36,16 +38,9 @@ model.eval()
 
 def build_prompt(question, docs):
     """
-    Builds a prompt for either:
+    Builds a prompt for:
     - RAG-based generation (docs provided)
     - LLM-only baseline (docs empty)
-
-    Args:
-        question (str)
-        docs (list): list of retrieved documents (each must have "text")
-
-    Returns:
-        prompt (str)
     """
 
     # -------- RAG MODE --------
@@ -84,20 +79,24 @@ Answer:
 
 
 ############################################
-# GENERATION FUNCTION
+# GENERATION FUNCTION (STATELESS)
 ############################################
 
 def generate_answer(
     question,
-    docs=None,
+    docs,
+    tokenizer,
+    model,
     max_new_tokens=128
 ):
     """
-    Generates an answer using the configured LLM.
+    Generates an answer using the given LLM.
 
     Args:
         question (str)
-        docs (list or None): retrieved documents for RAG, or [] for LLM-only
+        docs (list): [] for LLM-only, retrieved docs for RAG
+        tokenizer: HuggingFace tokenizer (REQUIRED)
+        model: HuggingFace causal LM (REQUIRED)
         max_new_tokens (int)
 
     Returns:
@@ -119,7 +118,7 @@ def generate_answer(
         outputs = model.generate(
             **inputs,
             max_new_tokens=max_new_tokens,
-            do_sample=False,        # deterministik (çok önemli)
+            do_sample=False,      # deterministic
             temperature=0.0,
             top_p=1.0
         )
@@ -129,26 +128,35 @@ def generate_answer(
         skip_special_tokens=True
     )
 
-    # Prompt'u temizle, sadece cevabı döndür
+    # Remove prompt, return only the answer
     answer = decoded[len(prompt):].strip()
-
     return answer
 
 
 ############################################
-# DEBUG / STANDALONE TEST
+# DEBUG / STANDALONE TEST (OPTIONAL)
 ############################################
 
 if __name__ == "__main__":
+    tokenizer, model = load_llm("mistralai/Mistral-7B-Instruct-v0.2")
+
     test_question = "What is the role of BRCA1 in breast cancer?"
 
     print("=== LLM-ONLY ===")
-    print(generate_answer(test_question, docs=[]))
+    print(generate_answer(
+        question=test_question,
+        docs=[],
+        tokenizer=tokenizer,
+        model=model
+    ))
 
     print("\n=== RAG MODE (DUMMY CONTEXT) ===")
     dummy_docs = [
-        {
-            "text": "BRCA1 is a tumor suppressor gene involved in DNA repair."
-        }
+        {"text": "BRCA1 is a tumor suppressor gene involved in DNA repair."}
     ]
-    print(generate_answer(test_question, docs=dummy_docs))
+    print(generate_answer(
+        question=test_question,
+        docs=dummy_docs,
+        tokenizer=tokenizer,
+        model=model
+    ))
