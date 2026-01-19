@@ -1,0 +1,31 @@
+========================================================
+              EXPERIMENT SUMMARY REPORT                 
+========================================================
+
+--------------------------------------------------------
+1. CLASSIFICATION METRICS (Macro-F1 & Accuracy)
+--------------------------------------------------------
+                   Model  Samples  Macro-F1  Accuracy
+   LLM-only (Mistral-7B)     1000  0.275564     0.326
+        LLM-only (Phi-3)     1000  0.182163     0.181
+  RAG (Mistral-7B + DPR)     1000  0.252372     0.315
+RAG (Mistral-7B + SBERT)     1000  0.269762     0.308
+       RAG (Phi-3 + DPR)     1000  0.315135     0.367
+     RAG (Phi-3 + SBERT)     1000  0.312844     0.371
+
+--------------------------------------------------------
+2. FAITHFULNESS METRICS (RAG Only)
+--------------------------------------------------------
+                   Model  Avg Citation Overlap
+  RAG (Mistral-7B + DPR)              0.626144
+RAG (Mistral-7B + SBERT)              0.730919
+       RAG (Phi-3 + DPR)              0.732145
+     RAG (Phi-3 + SBERT)              0.742241
+
+--------------------------------------------------------
+3. OBSERVATIONS
+--------------------------------------------------------
+Best Accuracy: 0.3710 (RAG (Phi-3 + SBERT))
+Best Macro-F1: 0.3151 (RAG (Phi-3 + DPR))
+
+RAG outperformed LLM-only in 2/4 comparisons (50%).

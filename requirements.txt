@@ -1,0 +1,14 @@
+faiss-cpu
+torch
+transformers
+numpy
+pandas
+
+datasets
+scikit-learn
+tqdm
+seaborn
+matplotlib
+sentence-transformers
+accelerate
+bitsandbytes
